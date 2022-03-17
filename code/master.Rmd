@@ -25,7 +25,7 @@ cpi_base <- cpi$cpiurs[cpi$year == 2021]
 #wbhao ORG 1989 - present
 #selfinc 1989 - present
 
-cpsorg <- load_org(1979:2021, year, month, orgwgt, lfstat, emp, selfemp, selfinc, manuf, wage, age, female, educ, wbho, wbhao, region) %>% 
+cpsorg <- load_org(1979:2021, year, month, orgwgt, lfstat, emp, selfemp, selfinc, manuf, wage, age, female, educ, gradeatn, wbho, wbhao, region) %>% 
   filter(age>=16, emp==1) %>% 
   #merge CPI to CPS data
   left_join(cpi, by='year') %>% 
@@ -39,49 +39,10 @@ cpsorg <- load_org(1979:2021, year, month, orgwgt, lfstat, emp, selfemp, selfinc
                             between(age,45,54) ~ 4,
                             between(age,55,64) ~ 5,
                             age>=65 ~ 6)) %>% 
-  set_value_labels(agebin = c("16-24"=1, "25-34"=2, "35-44"=3, "45-54"=4, "55-64"=5, "65&up"=6))
-  
+  mutate(not_selfemp = ifelse(selfemp==0 | is.na(selfemp), yes=1, no=0),
+         not_selfinc = ifelse(selfinc==0 | is.na(selfinc), yes=1, no=0)) %>% 
+  set_value_labels(agebin = c("16-24"=1, "25-34"=2, "35-44"=3, "45-54"=4, "55-64"=5, "65&up"=6))  
 
-```
-
-```{r do not use}
-# ### Average wage for all workers ###
-# 
-# all_avg_wage_79to88 <- cpsorg %>% 
-#   filter(selfemp==0, year<1989) %>% 
-#   group_by(year) %>% 
-#   summarize(avg_wage = weighted.mean(realwage, w=wgt, na.rm=TRUE),
-#             n=n(),
-#             wgt_n = sum(wgt))
-# 
-# #removed selfinc from 1989-present
-# all_avg_wages <- cpsorg %>% 
-# filter(selfemp==0, selfinc==0) %>% 
-# group_by(year) %>% 
-# summarize(avg_wage = weighted.mean(realwage, w=wgt, na.rm=TRUE),
-#           n=n(),
-#           wgt_n = sum(wgt)) %>% 
-#   #append 79-88 CPS ORG data
-#   bind_rows(all_avg_wage_79to88) %>% 
-#   arrange(year)
-# 
-# ### Average wage for MFG workers ###
-# 
-# mfg_avg_wages_79to88 <- cpsorg %>% 
-#   filter(manuf==1, selfemp==0, year<1989) %>% 
-#   group_by(year) %>% 
-#   summarize(avg_mfg_wage = weighted.mean(realwage, w=wgt, na.rm=TRUE),
-#             mfg_n=n(),
-#             wgt_mfg_n = sum(emp * wgt))
-# 
-# mfg_avg_wages <- cpsorg %>% 
-#   filter(manuf==1, selfemp==0, selfinc==0) %>% 
-#   group_by(year) %>% 
-#   summarize(avg_mfg_wage = weighted.mean(realwage, w=wgt, na.rm=TRUE),
-#             mfg_n=n(),
-#             wgt_mfg_n = sum(emp * wgt)) %>% 
-#   bind_rows(mfg_avg_wages_79to88) %>% 
-#   arrange(year)
 ```
 
 
@@ -89,28 +50,42 @@ cpsorg <- load_org(1979:2021, year, month, orgwgt, lfstat, emp, selfemp, selfinc
 
 ### Disaggregate manuf from all workers
 
-avg_wages_79to89 <- cpsorg %>% 
-  filter(selfemp==0, year<1989) %>% 
-  group_by(year, manuf) %>% 
-  summarize(avg_wage = weighted.mean(realwage, w=wgt, na.rm=TRUE),
-            n=n(),
-            employment = sum(wgt))
-
 #removed selfinc from 1989-present
 avg_wages <- cpsorg %>% 
-filter(selfemp==0, selfinc==0) %>% 
+filter(not_selfemp==1, not_selfinc==1) %>% 
 group_by(year, manuf) %>% 
 summarize(avg_wage = weighted.mean(realwage, w=wgt, na.rm=TRUE),
           n=n(),
           employment = sum(wgt)) %>% 
-  #append 79-88 CPS ORG data
-bind_rows(avg_wages_79to89) %>% 
-  arrange(year) %>% 
   mutate(manuf = to_factor(manuf)) %>% 
   pivot_wider(id_cols = year, names_from = manuf, values_from = c(avg_wage, n, employment)) %>% 
   clean_names() %>% 
   mutate(pct_diff_avgwage = (avg_wage_manufacturing/avg_wage_not_in_manufacturing)-1) %>% 
   write_csv(here(paste0("output/avg_wages_",format(Sys.time(), "%d-%b-%Y %H.%M"),".csv")))
+
+#average wages for BA plus
+avg_wages_collegeplus <- cpsorg %>% 
+filter(not_selfemp==1, not_selfinc==1, educ>=4) %>% 
+group_by(year, manuf) %>% 
+summarize(avg_wage = weighted.mean(realwage, w=wgt, na.rm=TRUE),
+          n=n(),
+          employment = sum(wgt)) %>% 
+  mutate(manuf = to_factor(manuf)) %>% 
+  pivot_wider(id_cols = year, names_from = manuf, values_from = c(avg_wage, n, employment)) %>% 
+  clean_names() %>% 
+  mutate(pct_diff_avgwage = (avg_wage_manufacturing/avg_wage_not_in_manufacturing)-1)
+  
+#average wages for less than BA
+avg_wages_somecoll <- cpsorg %>% 
+filter(not_selfemp==1, not_selfinc==1, educ<4) %>% 
+group_by(year, manuf) %>% 
+summarize(avg_wage = weighted.mean(realwage, w=wgt, na.rm=TRUE),
+          n=n(),
+          employment = sum(wgt)) %>% 
+  mutate(manuf = to_factor(manuf)) %>% 
+  pivot_wider(id_cols = year, names_from = manuf, values_from = c(avg_wage, n, employment)) %>% 
+  clean_names() %>% 
+  mutate(pct_diff_avgwage = (avg_wage_manufacturing/avg_wage_not_in_manufacturing)-1)
 
 ```
 
@@ -123,42 +98,45 @@ On Fri, Mar 11, 2022 at 2:28 PM L Josh Bivens <lbivens@epi.org> wrote:
 I’d like a few estimates of the “manufacturing wage premium”.
  
 1. One, just raw – average wage of manufacturing workers relative to average wage in all other industries (combined). Basically looking for (manufacturing wage/all other wages) - 1.
- 
 2. Second, regression-adjusted – regress hourly wages on 5 education category dummies, gender dummies, race/ethnicity dummies, region dummies, and a dummy indicating whether they work in manufacturing. That coefficient on manufacturing should range from .03 to .15. I don’t think I want to control for unionization for this one – cc’ing John so he can disagree with this if he thinks that’s wrong, and, happy to elaborate why, but, for now (unless we flip due to objections from John), we’ll run with no union control. The manufacturing wage premium is just the coefficient on the manufacturing dummy variable.
- 
 3. Third, regression-adjusted, but, just for workers with less than a 4-year college degree. So, regression-adjusted manufacturing premium from above, but, with sample exclusions to just include non-college workers.
- 
 4. Fourth, regression-adjusted, but, for workers with a 4-year degree and above. 
- 
 5. Would like all of those for as many years as microdata makes possible (73? 79?).
-
-create dummy variables https://www.statology.org/dummy-variables-in-r/
 
 
 ```{r Regressions mfg premium}
 
 #dataframe for our regressions
-wr_df <- cpsorg %>% 
   #Turn variables into factors for our categorical regression
-  mutate(across(educ|female|agebin|region|wbho|manuf, ~factor(.x)))
 
-wage_regs_79to88 <- wr_df %>% 
-  filter(selfemp==0, year<1989) %>%
+wage_regs <- cpsorg %>% 
+  filter(not_selfemp==1, not_selfinc==1) %>%
+  mutate(across(educ|female|agebin|region|wbho|manuf, ~factor(.x))) %>% 
   group_by(year) %>% 
   #model for our regression
-  summarize(lm(lnwage ~ manuf + educ + female + wbho + agebin + region, weights = wgt) %>%  tidy()) %>% 
-  filter(term=='manuf1')
-
-wage_regs_89to21 <- wr_df %>% 
-  filter(selfemp==0, selfinc==0) %>% 
-  group_by(year) %>% 
-  #model for our regression
-  summarize(lm(lnwage ~ manuf + educ + female + wbho + agebin + region, weights = wgt) %>%  tidy()) %>% 
-  filter(term=='manuf1')
-
-wage_regs <- wage_regs_79to88 %>% 
-  bind_rows(wage_regs_89to21) %>% 
+  summarize(lm(lnwage ~ manuf + educ + female + wbho + agebin + region) %>%  tidy()) %>% 
+  filter(term=='manuf1') %>% 
   write_csv(here(paste0("output/mfg_wage_prem_",format(Sys.time(), "%d-%b-%Y %H.%M"),".csv")))
+
+wage_regs_somecollege <- cpsorg %>% 
+  filter(not_selfemp==1, not_selfinc==1, educ<4) %>%
+  mutate(across(female|agebin|educ|region|wbho|manuf, ~factor(.x))) %>%
+  #create dummy educ variable where lths = 0 and hs = 1
+  group_by(year) %>% 
+  #model for our regression
+  summarize(lm(lnwage ~ manuf + female + wbho + agebin + educ + region) %>%  tidy()) %>% 
+  filter(term=='manuf1') %>% 
+  write_csv(here(paste0("output/wage_regs_somecollege_",format(Sys.time(), "%d-%b-%Y %H.%M"),".csv")))
+
+
+wage_regs_4yearplus <- cpsorg %>% 
+  filter(not_selfemp==1, not_selfinc==1, educ>=4) %>%
+  mutate(across(female|agebin|region|educ|wbho|manuf, ~factor(.x))) %>%
+  group_by(year) %>% 
+  #model for our regression
+  summarize(lm(lnwage ~ manuf + female + wbho + agebin + educ + region) %>%  tidy()) %>% 
+  filter(term=='manuf1') %>% 
+  write_csv(here(paste0("output/wage_regs_baplus_",format(Sys.time(), "%d-%b-%Y %H.%M"),".csv")))
 
 ```
 
